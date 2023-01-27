@@ -33,8 +33,10 @@ class MethodChannelQuickBlue extends QuickBluePlatform {
   }
 
   @override
-  void startScan() {
-    _method.invokeMethod('startScan')
+  void startScan({List<String> services= const []}) {
+    _method.invokeMethod('startScan',{
+      "services":services
+    })
         .then((_) => print('startScan invokeMethod success'));
   }
 

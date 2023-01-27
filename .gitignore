@@ -1,2 +1,5 @@
 # Flutter/Dart/Pub related
 pubspec.lock
+.idea
+.vscode
+.DS_Store

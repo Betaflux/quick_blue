@@ -66,7 +66,13 @@ public class SwiftQuickBluePlugin: NSObject, FlutterPlugin {
     case "isBluetoothAvailable":
       result(manager.state == .poweredOn)
     case "startScan":
-      manager.scanForPeripherals(withServices: nil)
+        let arguments = call.arguments as! Dictionary<String, Any>
+        let services = arguments["services"] as! Array<String>
+        var withServices = Array<CBUUID>()
+        for service in services {
+            withServices.append(CBUUID(string:service));
+        }
+      manager.scanForPeripherals(withServices: withServices)
       result(nil)
     case "stopScan":
       manager.stopScan()

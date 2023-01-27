@@ -2,12 +2,16 @@ package com.example.quick_blue
 
 import android.annotation.SuppressLint
 import android.bluetooth.*
+import android.bluetooth.BluetoothProfile.*
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelUuid
 import android.util.Log
 import androidx.annotation.NonNull
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -17,6 +21,7 @@ import io.flutter.plugin.common.MethodChannel.Result
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.*
+
 
 private const val TAG = "QuickBluePlugin"
 
@@ -67,7 +72,17 @@ class QuickBluePlugin: FlutterPlugin, MethodCallHandler, EventChannel.StreamHand
         result.success(bluetoothManager.adapter.isEnabled)
       }
       "startScan" -> {
-        bluetoothManager.adapter.bluetoothLeScanner?.startScan(scanCallback)
+        val serviceUUIDs: List<String> = call.argument<List<String>>("services")!!
+        val filters: MutableList<ScanFilter> = ArrayList<ScanFilter>(serviceUUIDs.size)
+        for (i in serviceUUIDs.indices) {
+          val uuid: String = serviceUUIDs[i]
+          val f = ScanFilter.Builder().setServiceUuid(ParcelUuid.fromString(uuid)).build()
+          filters.add(f)
+        }
+        print(filters)
+        val settings =
+          ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        bluetoothManager.adapter.bluetoothLeScanner?.startScan(filters, settings, scanCallback)
         result.success(null)
       }
       "stopScan" -> {
@@ -86,6 +101,7 @@ class QuickBluePlugin: FlutterPlugin, MethodCallHandler, EventChannel.StreamHand
           remoteDevice.connectGatt(context, false, gattCallback)
         }
         knownGatts.add(gatt)
+        refreshDeviceCache(gatt);
         result.success(null)
         // TODO connecting
       }
@@ -95,8 +111,6 @@ class QuickBluePlugin: FlutterPlugin, MethodCallHandler, EventChannel.StreamHand
                 ?: return result.error("IllegalArgument", "Unknown deviceId: $deviceId", null)
         cleanConnection(gatt)
         result.success(null)
-        //FIXME If `disconnect` is called before BluetoothGatt.STATE_CONNECTED
-        // there will be no `disconnected` message any more
       }
       "discoverServices" -> {
         val deviceId = call.argument<String>("deviceId")!!
@@ -161,7 +175,15 @@ class QuickBluePlugin: FlutterPlugin, MethodCallHandler, EventChannel.StreamHand
 
   private fun cleanConnection(gatt: BluetoothGatt) {
     knownGatts.remove(gatt)
-    gatt.disconnect()
+    val state = bluetoothManager.getConnectionState(gatt.device, GATT)
+    if (state ==
+      STATE_CONNECTED || state == STATE_CONNECTING
+    ) {
+      gatt.disconnect()
+    }
+    Handler(Looper.getMainLooper()).postDelayed({
+      gatt.close()
+    }, 500)
   }
 
   private val scanCallback = object : ScanCallback() {
@@ -263,16 +285,35 @@ class QuickBluePlugin: FlutterPlugin, MethodCallHandler, EventChannel.StreamHand
     }
 
     override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-      Log.v(TAG, "onCharacteristicChanged ${characteristic.uuid}, ${characteristic.value.contentToString()}")
-      sendMessage(messageConnector, mapOf(
-        "deviceId" to gatt.device.address,
-        "characteristicValue" to mapOf(
-          "characteristic" to characteristic.uuid.toString(),
-          "value" to characteristic.value
+      Log.v(
+        TAG,
+        "onCharacteristicChanged ${characteristic.uuid}, ${characteristic.value.contentToString()}"
+      )
+      sendMessage(
+        messageConnector, mapOf(
+          "deviceId" to gatt.device.address,
+          "characteristicValue" to mapOf(
+            "characteristic" to characteristic.uuid.toString(),
+            "value" to characteristic.value
+          )
         )
-      ))
+      )
     }
   }
+
+  private fun refreshDeviceCache(gatt: BluetoothGatt): Boolean {
+    var isRefreshed = false
+
+    try {
+      val localMethod = gatt.javaClass.getMethod("refresh")
+      isRefreshed = (localMethod.invoke(gatt) as Boolean)
+      Log.v(TAG, "Gatt cache refresh successful: $isRefreshed")
+    } catch (localException: Exception) {
+      Log.e(TAG, "An exception occurred while refreshing device$localException")
+    }
+    return isRefreshed
+  }
+
 }
 
 val ScanResult.manufacturerDataHead: ByteArray?
